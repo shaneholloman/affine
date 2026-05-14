@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { AiJobStatus } from '@prisma/client';
 
 import {
@@ -9,20 +9,24 @@ import {
   OnJob,
   sniffMime,
 } from '../../../base';
+import {
+  RealtimePublisher,
+  realtimeTranscriptTaskRoom,
+} from '../../../core/realtime';
 import { Models } from '../../../models';
-import { ConversationPolicy } from '../conversation/policy';
+import { CopilotAccessPolicy } from '../access';
 import { PromptService } from '../prompt';
 import { CopilotProviderType } from '../providers/types';
 import { ActionRuntimeBridge } from '../runtime/action-runtime-bridge';
 import { TaskPolicy } from '../runtime/task-policy';
 import { CopilotStorage } from '../storage';
+import { taskToJob, type TranscriptionJob } from './job';
 import {
   TranscriptActionResultContract,
   TranscriptPayloadSchema,
 } from './schema';
 import type {
   AudioBlobInfos,
-  TranscriptionPayload,
   TranscriptionPayloadV2,
   TranscriptionSubmitInput,
 } from './types';
@@ -31,27 +35,6 @@ import { readStream } from './utils';
 const TRANSCRIPT_ACTION_ID = 'transcript.audio.gemini';
 const TRANSCRIPT_ACTION_VERSION = 'v1';
 const TRANSCRIPT_STRATEGY = 'gemini';
-
-export type TranscriptionJob = {
-  id: string;
-  status: AiJobStatus;
-  infos?: AudioBlobInfos;
-  transcription?: TranscriptionPayload;
-};
-
-function taskStatusToPublicStatus(status: string): AiJobStatus {
-  switch (status) {
-    case 'pending':
-      return AiJobStatus.pending;
-    case 'running':
-      return AiJobStatus.running;
-    case 'ready':
-    case 'settled':
-      return AiJobStatus.finished;
-    default:
-      return AiJobStatus.failed;
-  }
-}
 
 @Injectable()
 export class CopilotTranscriptionService {
@@ -62,7 +45,8 @@ export class CopilotTranscriptionService {
     private readonly tasks: TaskPolicy,
     private readonly prompts: PromptService,
     private readonly actionBridge: ActionRuntimeBridge,
-    @Optional() private readonly conversationPolicy?: ConversationPolicy
+    private readonly access: CopilotAccessPolicy,
+    private readonly realtime: RealtimePublisher
   ) {}
 
   private parseTaskPayload(payload: unknown): TranscriptionPayloadV2 {
@@ -78,33 +62,6 @@ export class CopilotTranscriptionService {
       version: 'transcript-result-v1',
       strategy: TRANSCRIPT_STRATEGY,
     };
-  }
-
-  private taskToJob(
-    task: {
-      id: string;
-      status: string;
-      protectedResult: unknown;
-    } | null,
-    mapStatus: (status: string) => AiJobStatus = taskStatusToPublicStatus
-  ): TranscriptionJob | null {
-    if (!task) {
-      return null;
-    }
-
-    const status = mapStatus(task.status);
-    const ret: TranscriptionJob = {
-      id: task.id,
-      status,
-    };
-    if (task.protectedResult) {
-      const parsed = TranscriptPayloadSchema.safeParse(task.protectedResult);
-      ret.infos = parsed.success ? (parsed.data.infos ?? []) : [];
-      if (task.status === 'settled' && parsed.success) {
-        ret.transcription = parsed.data;
-      }
-    }
-    return ret;
   }
 
   private async resolveTranscriptStrategy(userId: string, strategy?: string) {
@@ -223,6 +180,12 @@ export class CopilotTranscriptionService {
       throw new CopilotTranscriptionJobExists();
     }
 
+    await this.access.assertQuotaOrByok({
+      userId,
+      workspaceId,
+      featureKind: 'transcript',
+    });
+
     const { model, strategy } = await this.resolveTranscriptStrategy(
       userId,
       input?.strategy ?? undefined
@@ -246,6 +209,7 @@ export class CopilotTranscriptionService {
       modelId: model,
     });
     await this.models.copilotTranscriptTask.markRunning(task.id);
+    this.publishTaskChanged(workspaceId, task.id, AiJobStatus.running);
 
     return { id: task.id, status: AiJobStatus.running, infos };
   }
@@ -270,6 +234,12 @@ export class CopilotTranscriptionService {
       );
     }
 
+    await this.access.assertQuotaOrByok({
+      userId,
+      workspaceId,
+      featureKind: 'transcript',
+    });
+
     const payload = this.parseTaskPayload(task.protectedResult);
     const { model } = await this.resolveTranscriptStrategy(
       userId,
@@ -282,6 +252,7 @@ export class CopilotTranscriptionService {
       retryOf: task.actionRunId ?? undefined,
     });
     await this.models.copilotTranscriptTask.markRunning(taskId);
+    this.publishTaskChanged(workspaceId, taskId, AiJobStatus.running);
     return {
       id: taskId,
       status: AiJobStatus.running,
@@ -307,14 +278,18 @@ export class CopilotTranscriptionService {
       return null;
     }
 
-    const settled =
-      task.status === 'settled'
-        ? task
-        : await (async () => {
-            await this.conversationPolicy?.checkQuota(userId);
-            return await this.models.copilotTranscriptTask.settle(task.id);
-          })();
-    return this.taskToJob(settled);
+    if (task.status === 'settled') {
+      return taskToJob(task);
+    }
+
+    await this.access.assertQuotaOrByok({
+      userId,
+      workspaceId,
+      featureKind: 'transcript',
+    });
+
+    const settled = await this.models.copilotTranscriptTask.settle(task.id);
+    return taskToJob(settled);
   }
 
   async queryTask(
@@ -329,10 +304,7 @@ export class CopilotTranscriptionService {
       taskId,
       blobId
     );
-    if (task) {
-      return this.taskToJob(task);
-    }
-    return null;
+    return taskToJob(task);
   }
 
   @OnJob('copilot.transcript.task.submit')
@@ -373,11 +345,23 @@ export class CopilotTranscriptionService {
         },
         onRunCreated: async ({ runId }) => {
           await this.models.copilotTranscriptTask.markRunning(taskId, runId);
+          this.publishTaskChanged(
+            task.workspaceId,
+            taskId,
+            AiJobStatus.running
+          );
         },
         prepareStructuredRoutes: {
           stepId: 'transcribe',
           modelId,
           messages,
+          options: {
+            user: task.userId,
+            workspace: task.workspaceId,
+            taskId,
+            billingUnitId: taskId,
+            featureKind: 'transcript',
+          },
           prefer: CopilotProviderType.Gemini,
           responseContract: TranscriptActionResultContract,
         },
@@ -402,6 +386,7 @@ export class CopilotTranscriptionService {
         protectedResult: parsedResult,
         errorCode: null,
       });
+      this.publishTaskChanged(task.workspaceId, taskId, AiJobStatus.finished);
     } catch (error) {
       await this.models.copilotTranscriptTask.complete(taskId, {
         status: 'failed',
@@ -411,7 +396,27 @@ export class CopilotTranscriptionService {
         errorCode:
           error instanceof Error ? error.message : 'transcript_task_failed',
       });
+      this.publishTaskChanged(
+        task.workspaceId,
+        taskId,
+        AiJobStatus.failed,
+        error instanceof Error ? error.message : 'transcript_task_failed'
+      );
       throw error;
     }
+  }
+
+  private publishTaskChanged(
+    workspaceId: string,
+    taskId: string,
+    status: AiJobStatus,
+    error?: string
+  ) {
+    this.realtime.publish(
+      'copilot.transcript.task.changed',
+      { workspaceId, taskId },
+      { taskId, status, error },
+      { room: realtimeTranscriptTaskRoom(workspaceId, taskId) }
+    );
   }
 }

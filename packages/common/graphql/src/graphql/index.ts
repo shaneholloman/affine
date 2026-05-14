@@ -1033,19 +1033,6 @@ export const uploadCommentAttachmentMutation = {
   file: true,
 };
 
-export const applyDocUpdatesMutation = {
-  id: 'applyDocUpdatesMutation' as const,
-  op: 'applyDocUpdates',
-  query: `mutation applyDocUpdates($workspaceId: String!, $docId: String!, $op: String!, $updates: String!) {
-  applyDocUpdates(
-    workspaceId: $workspaceId
-    docId: $docId
-    op: $op
-    updates: $updates
-  )
-}`,
-};
-
 export const addContextBlobMutation = {
   id: 'addContextBlobMutation' as const,
   op: 'addContextBlob',
@@ -1309,6 +1296,7 @@ export const getWorkspaceEmbeddingStatusQuery = {
     embedded
   }
 }`,
+  deprecations: ["'queryWorkspaceEmbeddingStatus' is deprecated: Use realtime subscription \"workspace.embedding.progress.changed\" instead."],
 };
 
 export const queueWorkspaceEmbeddingMutation = {
@@ -1634,6 +1622,7 @@ export const getTranscriptTaskQuery = {
     }
   }
 }`,
+  deprecations: ["'transcriptTask' is deprecated: Use realtime subscription \"copilot.transcript.task.changed\" instead."],
 };
 
 export const retryTranscriptTaskMutation = {
@@ -2595,6 +2584,27 @@ ${licenseBodyFragment}`,
   file: true,
 };
 
+export const previewLicenseMutation = {
+  id: 'previewLicenseMutation' as const,
+  op: 'previewLicense',
+  query: `mutation previewLicense($license: Upload!) {
+  previewLicense(license: $license) {
+    id
+    workspaceId
+    plan
+    recurring
+    quantity
+    issuedAt
+    expiresAt
+    endAt
+    entity
+    issuer
+    valid
+  }
+}`,
+  file: true,
+};
+
 export const listNotificationsQuery = {
   id: 'listNotificationsQuery' as const,
   op: 'listNotifications',
@@ -2638,11 +2648,10 @@ export const notificationCountQuery = {
   op: 'notificationCount',
   query: `query notificationCount {
   currentUser {
-    notifications(pagination: {first: 1}) {
-      totalCount
-    }
+    notificationCount
   }
 }`,
+  deprecations: ["'notificationCount' is deprecated: Use realtime subscription \"notification.count.changed\" instead."],
 };
 
 export const pricesQuery = {
@@ -2997,6 +3006,117 @@ export const workspaceBlobQuotaQuery = {
 }`,
 };
 
+export const clearWorkspaceByokConfigsMutation = {
+  id: 'clearWorkspaceByokConfigsMutation' as const,
+  op: 'clearWorkspaceByokConfigs',
+  query: `mutation clearWorkspaceByokConfigs($workspaceId: String!) {
+  clearWorkspaceByokConfigs(workspaceId: $workspaceId)
+}`,
+};
+
+export const deleteWorkspaceByokConfigMutation = {
+  id: 'deleteWorkspaceByokConfigMutation' as const,
+  op: 'deleteWorkspaceByokConfig',
+  query: `mutation deleteWorkspaceByokConfig($workspaceId: String!, $id: ID!) {
+  deleteWorkspaceByokConfig(workspaceId: $workspaceId, id: $id)
+}`,
+};
+
+export const reorderWorkspaceByokConfigsMutation = {
+  id: 'reorderWorkspaceByokConfigsMutation' as const,
+  op: 'reorderWorkspaceByokConfigs',
+  query: `mutation reorderWorkspaceByokConfigs($input: ReorderWorkspaceByokConfigsInput!) {
+  reorderWorkspaceByokConfigs(input: $input) {
+    id
+    sortOrder
+  }
+}`,
+};
+
+export const testWorkspaceByokConfigMutation = {
+  id: 'testWorkspaceByokConfigMutation' as const,
+  op: 'testWorkspaceByokConfig',
+  query: `mutation testWorkspaceByokConfig($input: TestWorkspaceByokConfigInput!) {
+  testWorkspaceByokConfig(input: $input) {
+    ok
+    status
+    message
+  }
+}`,
+};
+
+export const upsertWorkspaceByokConfigMutation = {
+  id: 'upsertWorkspaceByokConfigMutation' as const,
+  op: 'upsertWorkspaceByokConfig',
+  query: `mutation upsertWorkspaceByokConfig($input: UpsertWorkspaceByokConfigInput!) {
+  upsertWorkspaceByokConfig(input: $input) {
+    id
+  }
+}`,
+};
+
+export const createWorkspaceByokLocalLeaseMutation = {
+  id: 'createWorkspaceByokLocalLeaseMutation' as const,
+  op: 'createWorkspaceByokLocalLease',
+  query: `mutation createWorkspaceByokLocalLease($input: CreateWorkspaceByokLocalLeaseInput!) {
+  createWorkspaceByokLocalLease(input: $input) {
+    leaseId
+    expiresAt
+  }
+}`,
+};
+
+export const workspaceByokSettingsQuery = {
+  id: 'workspaceByokSettingsQuery' as const,
+  op: 'workspaceByokSettings',
+  query: `query workspaceByokSettings($id: String!, $from: DateTime!, $to: DateTime!) {
+  workspace(id: $id) {
+    id
+    byokSettings {
+      workspaceId
+      entitled
+      serverEntitled
+      localEntitled
+      entitlementRequired
+      allowedProviders
+      localStorageSupported
+      customEndpointSupported
+      hasAiPlan
+      keys {
+        id
+        provider
+        name
+        description
+        storage
+        configured
+        enabled
+        endpoint
+        endpointEditable
+        sortOrder
+        capabilities
+        testStatus
+        disabledReason
+        lastTestedAt
+        lastTestError
+        lastUsedAt
+        lastErrorAt
+        lastError
+      }
+      warnings {
+        featureKind
+        reason
+        requiredProviders
+      }
+    }
+    byokUsage(from: $from, to: $to) {
+      date
+      featureKind
+      totalTokens
+    }
+  }
+}`,
+};
+
 export const getWorkspaceConfigQuery = {
   id: 'getWorkspaceConfigQuery' as const,
   op: 'getWorkspaceConfig',
@@ -3006,10 +3126,6 @@ export const getWorkspaceConfigQuery = {
     enableSharing
     enableUrlPreview
     enableDocEmbedding
-    inviteLink {
-      link
-      expireTime
-    }
   }
 }`,
 };
@@ -3072,6 +3188,19 @@ export const acceptInviteByInviteIdMutation = {
   op: 'acceptInviteByInviteId',
   query: `mutation acceptInviteByInviteId($workspaceId: String!, $inviteId: String!) {
   acceptInviteById(workspaceId: $workspaceId, inviteId: $inviteId)
+}`,
+};
+
+export const getWorkspaceInviteLinkQuery = {
+  id: 'getWorkspaceInviteLinkQuery' as const,
+  op: 'getWorkspaceInviteLink',
+  query: `query getWorkspaceInviteLink($id: String!) {
+  workspace(id: $id) {
+    inviteLink {
+      link
+      expireTime
+    }
+  }
 }`,
 };
 

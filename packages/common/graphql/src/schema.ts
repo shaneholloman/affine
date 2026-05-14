@@ -132,6 +132,21 @@ export interface AdminDashboardValueDayPoint {
   value: Scalars['SafeInt']['output'];
 }
 
+export interface AdminLicensePreview {
+  __typename?: 'AdminLicensePreview';
+  endAt: Scalars['DateTime']['output'];
+  entity: Scalars['String']['output'];
+  expiresAt: Scalars['DateTime']['output'];
+  id: Scalars['String']['output'];
+  issuedAt: Scalars['DateTime']['output'];
+  issuer: Scalars['String']['output'];
+  plan: SubscriptionPlan;
+  quantity: Scalars['Int']['output'];
+  recurring: SubscriptionRecurring;
+  valid: Scalars['Boolean']['output'];
+  workspaceId: Scalars['String']['output'];
+}
+
 export interface AdminSharedLinkTopItem {
   __typename?: 'AdminSharedLinkTopItem';
   docId: Scalars['String']['output'];
@@ -347,6 +362,24 @@ export interface BlobUploadedPart {
   partNumber: Scalars['Int']['output'];
 }
 
+export enum ByokKeyStorage {
+  local = 'local',
+  server = 'server',
+}
+
+export enum ByokKeyTestStatus {
+  failed = 'failed',
+  passed = 'passed',
+  untested = 'untested',
+}
+
+export enum ByokProvider {
+  anthropic = 'anthropic',
+  fal = 'fal',
+  gemini = 'gemini',
+  openai = 'openai',
+}
+
 export interface CalendarAccountObjectType {
   __typename?: 'CalendarAccountObjectType';
   calendars: Array<CalendarSubscriptionObjectType>;
@@ -547,6 +580,7 @@ export interface Copilot {
    * @deprecated use `chats` instead
    */
   sessions: Array<CopilotSessionType>;
+  /** @deprecated Use realtime subscription "copilot.transcript.task.changed" instead. */
   transcriptTask: Maybe<TranscriptionResultType>;
   workspaceId: Maybe<Scalars['ID']['output']>;
 }
@@ -866,6 +900,27 @@ export interface CreateUserInput {
   email: Scalars['String']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
   password?: InputMaybe<Scalars['String']['input']>;
+}
+
+export interface CreateWorkspaceByokLocalLeaseInput {
+  providers: Array<CreateWorkspaceByokLocalLeaseProviderInput>;
+  workspaceId: Scalars['String']['input'];
+}
+
+export interface CreateWorkspaceByokLocalLeaseProviderInput {
+  apiKey: Scalars['String']['input'];
+  description?: InputMaybe<Scalars['String']['input']>;
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  endpoint?: InputMaybe<Scalars['String']['input']>;
+  name: Scalars['String']['input'];
+  provider: ByokProvider;
+  sortOrder?: InputMaybe<Scalars['SafeInt']['input']>;
+}
+
+export interface CreateWorkspaceByokLocalLeaseResultType {
+  __typename?: 'CreateWorkspaceByokLocalLeaseResultType';
+  expiresAt: Scalars['DateTime']['output'];
+  leaseId: Scalars['String']['output'];
 }
 
 export interface CredentialsRequirementType {
@@ -1727,8 +1782,6 @@ export interface Mutation {
   addWorkspaceFeature: Scalars['Boolean']['output'];
   /** Update workspace flags and features for admin */
   adminUpdateWorkspace: Maybe<AdminWorkspace>;
-  /** Apply updates to a doc using LLM and return the merged markdown. */
-  applyDocUpdates: Scalars['String']['output'];
   approveMember: Scalars['Boolean']['output'];
   /** Ban an user */
   banUser: UserType;
@@ -1737,6 +1790,7 @@ export interface Mutation {
   changePassword: Scalars['Boolean']['output'];
   /** Cleanup sessions */
   cleanupCopilotSession: Array<Scalars['String']['output']>;
+  clearWorkspaceByokConfigs: Scalars['Boolean']['output'];
   completeBlobUpload: Scalars['String']['output'];
   createBlobUpload: BlobUploadInit;
   /** Create change password url */
@@ -1764,6 +1818,7 @@ export interface Mutation {
   createUser: UserType;
   /** Create a new workspace */
   createWorkspace: WorkspaceType;
+  createWorkspaceByokLocalLease: CreateWorkspaceByokLocalLeaseResultType;
   deactivateLicense: Scalars['Boolean']['output'];
   deleteAccount: DeleteAccount;
   deleteBlob: Scalars['Boolean']['output'];
@@ -1774,6 +1829,7 @@ export interface Mutation {
   /** Delete a user account */
   deleteUser: DeleteAccount;
   deleteWorkspace: Scalars['Boolean']['output'];
+  deleteWorkspaceByokConfig: Scalars['Boolean']['output'];
   /** Reenable an banned user */
   enableUser: UserType;
   /** Create a chat session */
@@ -1791,6 +1847,7 @@ export interface Mutation {
   linkCalendarAccount: Scalars['String']['output'];
   /** mention user in a doc */
   mentionUser: Scalars['ID']['output'];
+  previewLicense: AdminLicensePreview;
   publishDoc: DocType;
   /** queue workspace doc embedding */
   queueWorkspaceEmbedding: Scalars['Boolean']['output'];
@@ -1815,6 +1872,7 @@ export interface Mutation {
   /** Remove workspace embedding files */
   removeWorkspaceEmbeddingFiles: Scalars['Boolean']['output'];
   removeWorkspaceFeature: Scalars['Boolean']['output'];
+  reorderWorkspaceByokConfigs: Array<WorkspaceByokKeyConfigType>;
   /** Request to apply the subscription in advance */
   requestApplySubscription: Array<SubscriptionType>;
   /** Resolve a comment or not */
@@ -1835,6 +1893,7 @@ export interface Mutation {
   setBlob: Scalars['String']['output'];
   settleTranscriptTask: Maybe<TranscriptionResultType>;
   submitTranscriptTask: Maybe<TranscriptionResultType>;
+  testWorkspaceByokConfig: TestWorkspaceByokConfigResultType;
   unlinkCalendarAccount: Scalars['Boolean']['output'];
   /** update app configuration */
   updateAppConfig: Scalars['JSONObject']['output'];
@@ -1864,6 +1923,7 @@ export interface Mutation {
   uploadAvatar: UserType;
   /** Upload a comment attachment and return the access url */
   uploadCommentAttachment: Scalars['String']['output'];
+  upsertWorkspaceByokConfig: WorkspaceByokKeyConfigType;
   verifyEmail: Scalars['Boolean']['output'];
 }
 
@@ -1915,13 +1975,6 @@ export interface MutationAdminUpdateWorkspaceArgs {
   input: AdminUpdateWorkspaceInput;
 }
 
-export interface MutationApplyDocUpdatesArgs {
-  docId: Scalars['String']['input'];
-  op: Scalars['String']['input'];
-  updates: Scalars['String']['input'];
-  workspaceId: Scalars['String']['input'];
-}
-
 export interface MutationApproveMemberArgs {
   userId: Scalars['String']['input'];
   workspaceId: Scalars['String']['input'];
@@ -1950,6 +2003,11 @@ export interface MutationChangePasswordArgs {
 
 export interface MutationCleanupCopilotSessionArgs {
   options: DeleteSessionInput;
+}
+
+export interface MutationClearWorkspaceByokConfigsArgs {
+  provider?: InputMaybe<ByokProvider>;
+  workspaceId: Scalars['String']['input'];
 }
 
 export interface MutationCompleteBlobUploadArgs {
@@ -2017,6 +2075,10 @@ export interface MutationCreateWorkspaceArgs {
   init?: InputMaybe<Scalars['Upload']['input']>;
 }
 
+export interface MutationCreateWorkspaceByokLocalLeaseArgs {
+  input: CreateWorkspaceByokLocalLeaseInput;
+}
+
 export interface MutationDeactivateLicenseArgs {
   workspaceId: Scalars['String']['input'];
 }
@@ -2042,6 +2104,11 @@ export interface MutationDeleteUserArgs {
 
 export interface MutationDeleteWorkspaceArgs {
   id: Scalars['String']['input'];
+}
+
+export interface MutationDeleteWorkspaceByokConfigArgs {
+  id: Scalars['ID']['input'];
+  workspaceId: Scalars['String']['input'];
 }
 
 export interface MutationEnableUserArgs {
@@ -2102,6 +2169,10 @@ export interface MutationMentionUserArgs {
   input: MentionInput;
 }
 
+export interface MutationPreviewLicenseArgs {
+  license: Scalars['Upload']['input'];
+}
+
 export interface MutationPublishDocArgs {
   docId: Scalars['String']['input'];
   mode?: InputMaybe<PublicDocMode>;
@@ -2151,6 +2222,10 @@ export interface MutationRemoveWorkspaceEmbeddingFilesArgs {
 export interface MutationRemoveWorkspaceFeatureArgs {
   feature: FeatureType;
   workspaceId: Scalars['String']['input'];
+}
+
+export interface MutationReorderWorkspaceByokConfigsArgs {
+  input: ReorderWorkspaceByokConfigsInput;
 }
 
 export interface MutationRequestApplySubscriptionArgs {
@@ -2241,6 +2316,10 @@ export interface MutationSubmitTranscriptTaskArgs {
   workspaceId: Scalars['String']['input'];
 }
 
+export interface MutationTestWorkspaceByokConfigArgs {
+  input: TestWorkspaceByokConfigInput;
+}
+
 export interface MutationUnlinkCalendarAccountArgs {
   accountId: Scalars['String']['input'];
 }
@@ -2321,6 +2400,10 @@ export interface MutationUploadCommentAttachmentArgs {
   attachment: Scalars['Upload']['input'];
   docId: Scalars['String']['input'];
   workspaceId: Scalars['String']['input'];
+}
+
+export interface MutationUpsertWorkspaceByokConfigArgs {
+  input: UpsertWorkspaceByokConfigInput;
 }
 
 export interface MutationVerifyEmailArgs {
@@ -2545,11 +2628,6 @@ export interface Query {
   adminWorkspacesCount: Scalars['Int']['output'];
   /** get the whole app configuration */
   appConfig: Scalars['JSONObject']['output'];
-  /**
-   * Apply updates to a doc using LLM and return the merged markdown.
-   * @deprecated use Mutation.applyDocUpdates
-   */
-  applyDocUpdates: Scalars['String']['output'];
   /** Get current user */
   currentUser: Maybe<UserType>;
   error: ErrorDataUnion;
@@ -2558,7 +2636,10 @@ export interface Query {
   prices: Array<SubscriptionPrice>;
   /** Get public user by id */
   publicUserById: Maybe<PublicUserType>;
-  /** query workspace embedding status */
+  /**
+   * query workspace embedding status
+   * @deprecated Use realtime subscription "workspace.embedding.progress.changed" instead.
+   */
   queryWorkspaceEmbeddingStatus: ContextWorkspaceEmbeddingStatus;
   /** @deprecated use currentUser.revealedAccessTokens */
   revealedAccessTokens: Array<RevealedAccessToken>;
@@ -2606,13 +2687,6 @@ export interface QueryAdminWorkspacesArgs {
 
 export interface QueryAdminWorkspacesCountArgs {
   filter: ListWorkspaceInput;
-}
-
-export interface QueryApplyDocUpdatesArgs {
-  docId: Scalars['String']['input'];
-  op: Scalars['String']['input'];
-  updates: Scalars['String']['input'];
-  workspaceId: Scalars['String']['input'];
 }
 
 export interface QueryErrorArgs {
@@ -2721,6 +2795,12 @@ export interface RemoveContextDocInput {
 export interface RemoveContextFileInput {
   contextId: Scalars['String']['input'];
   fileId: Scalars['String']['input'];
+}
+
+export interface ReorderWorkspaceByokConfigsInput {
+  ids: Array<Scalars['ID']['input']>;
+  storage: ByokKeyStorage;
+  workspaceId: Scalars['String']['input'];
 }
 
 export interface ReplyCreateInput {
@@ -3046,6 +3126,22 @@ export enum SubscriptionVariant {
   Onetime = 'Onetime',
 }
 
+export interface TestWorkspaceByokConfigInput {
+  apiKey?: InputMaybe<Scalars['String']['input']>;
+  configId?: InputMaybe<Scalars['ID']['input']>;
+  endpoint?: InputMaybe<Scalars['String']['input']>;
+  provider: ByokProvider;
+  storage: ByokKeyStorage;
+  workspaceId: Scalars['String']['input'];
+}
+
+export interface TestWorkspaceByokConfigResultType {
+  __typename?: 'TestWorkspaceByokConfigResultType';
+  message: Maybe<Scalars['String']['output']>;
+  ok: Scalars['Boolean']['output'];
+  status: ByokKeyTestStatus;
+}
+
 export enum TimeBucket {
   Day = 'Day',
   Minute = 'Minute',
@@ -3208,6 +3304,19 @@ export interface UpdateWorkspaceInput {
   public?: InputMaybe<Scalars['Boolean']['input']>;
 }
 
+export interface UpsertWorkspaceByokConfigInput {
+  apiKey?: InputMaybe<Scalars['String']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  endpoint?: InputMaybe<Scalars['String']['input']>;
+  id?: InputMaybe<Scalars['ID']['input']>;
+  name: Scalars['String']['input'];
+  provider: ByokProvider;
+  sortOrder?: InputMaybe<Scalars['SafeInt']['input']>;
+  storage: ByokKeyStorage;
+  workspaceId: Scalars['String']['input'];
+}
+
 export interface UserImportFailedType {
   __typename?: 'UserImportFailedType';
   email: Scalars['String']['output'];
@@ -3285,7 +3394,10 @@ export interface UserType {
   invoices: Array<InvoiceType>;
   /** User name */
   name: Scalars['String']['output'];
-  /** Get user notification count */
+  /**
+   * Get user notification count
+   * @deprecated Use realtime subscription "notification.count.changed" instead.
+   */
   notificationCount: Scalars['Int']['output'];
   /** Get current user notifications */
   notifications: PaginatedNotificationObjectType;
@@ -3321,6 +3433,57 @@ export interface VersionRejectedDataType {
   __typename?: 'VersionRejectedDataType';
   serverVersion: Scalars['String']['output'];
   version: Scalars['String']['output'];
+}
+
+export interface WorkspaceByokCapabilityWarningType {
+  __typename?: 'WorkspaceByokCapabilityWarningType';
+  featureKind: Scalars['String']['output'];
+  reason: Scalars['String']['output'];
+  requiredProviders: Array<ByokProvider>;
+}
+
+export interface WorkspaceByokKeyConfigType {
+  __typename?: 'WorkspaceByokKeyConfigType';
+  capabilities: Array<Scalars['String']['output']>;
+  configured: Scalars['Boolean']['output'];
+  description: Maybe<Scalars['String']['output']>;
+  disabledReason: Maybe<Scalars['String']['output']>;
+  enabled: Scalars['Boolean']['output'];
+  endpoint: Maybe<Scalars['String']['output']>;
+  endpointEditable: Scalars['Boolean']['output'];
+  id: Scalars['ID']['output'];
+  lastError: Maybe<Scalars['String']['output']>;
+  lastErrorAt: Maybe<Scalars['DateTime']['output']>;
+  lastTestError: Maybe<Scalars['String']['output']>;
+  lastTestedAt: Maybe<Scalars['DateTime']['output']>;
+  lastUsedAt: Maybe<Scalars['DateTime']['output']>;
+  name: Scalars['String']['output'];
+  provider: ByokProvider;
+  sortOrder: Scalars['SafeInt']['output'];
+  storage: ByokKeyStorage;
+  testStatus: ByokKeyTestStatus;
+}
+
+export interface WorkspaceByokSettingsType {
+  __typename?: 'WorkspaceByokSettingsType';
+  allowedProviders: Array<ByokProvider>;
+  customEndpointSupported: Scalars['Boolean']['output'];
+  entitled: Scalars['Boolean']['output'];
+  entitlementRequired: Array<Scalars['String']['output']>;
+  hasAiPlan: Scalars['Boolean']['output'];
+  keys: Array<WorkspaceByokKeyConfigType>;
+  localEntitled: Scalars['Boolean']['output'];
+  localStorageSupported: Scalars['Boolean']['output'];
+  serverEntitled: Scalars['Boolean']['output'];
+  warnings: Array<WorkspaceByokCapabilityWarningType>;
+  workspaceId: Scalars['String']['output'];
+}
+
+export interface WorkspaceByokUsagePointType {
+  __typename?: 'WorkspaceByokUsagePointType';
+  date: Scalars['DateTime']['output'];
+  featureKind: Scalars['String']['output'];
+  totalTokens: Scalars['SafeInt']['output'];
 }
 
 export interface WorkspaceCalendarItemInput {
@@ -3453,6 +3616,8 @@ export interface WorkspaceType {
   blobs: Array<ListedBlob>;
   /** Blobs size of workspace */
   blobsSize: Scalars['Int']['output'];
+  byokSettings: WorkspaceByokSettingsType;
+  byokUsage: Array<WorkspaceByokUsagePointType>;
   calendars: Array<WorkspaceCalendarObjectType>;
   /** Get comment changes of a doc */
   commentChanges: PaginatedCommentChangeObjectType;
@@ -3524,6 +3689,11 @@ export interface WorkspaceTypeBlobUploadPartUrlArgs {
   key: Scalars['String']['input'];
   partNumber: Scalars['Int']['input'];
   uploadId: Scalars['String']['input'];
+}
+
+export interface WorkspaceTypeByokUsageArgs {
+  from: Scalars['DateTime']['input'];
+  to: Scalars['DateTime']['input'];
 }
 
 export interface WorkspaceTypeCommentChangesArgs {
@@ -4640,18 +4810,6 @@ export type UploadCommentAttachmentMutationVariables = Exact<{
 export type UploadCommentAttachmentMutation = {
   __typename?: 'Mutation';
   uploadCommentAttachment: string;
-};
-
-export type ApplyDocUpdatesMutationVariables = Exact<{
-  workspaceId: Scalars['String']['input'];
-  docId: Scalars['String']['input'];
-  op: Scalars['String']['input'];
-  updates: Scalars['String']['input'];
-}>;
-
-export type ApplyDocUpdatesMutation = {
-  __typename?: 'Mutation';
-  applyDocUpdates: string;
 };
 
 export type AddContextBlobMutationVariables = Exact<{
@@ -7041,6 +7199,28 @@ export type LicenseBodyFragment = {
   variant: SubscriptionVariant | null;
 };
 
+export type PreviewLicenseMutationVariables = Exact<{
+  license: Scalars['Upload']['input'];
+}>;
+
+export type PreviewLicenseMutation = {
+  __typename?: 'Mutation';
+  previewLicense: {
+    __typename?: 'AdminLicensePreview';
+    id: string;
+    workspaceId: string;
+    plan: SubscriptionPlan;
+    recurring: SubscriptionRecurring;
+    quantity: number;
+    issuedAt: string;
+    expiresAt: string;
+    endAt: string;
+    entity: string;
+    issuer: string;
+    valid: boolean;
+  };
+};
+
 export type ListNotificationsQueryVariables = Exact<{
   pagination: PaginationInput;
 }>;
@@ -7090,13 +7270,7 @@ export type NotificationCountQueryVariables = Exact<{ [key: string]: never }>;
 
 export type NotificationCountQuery = {
   __typename?: 'Query';
-  currentUser: {
-    __typename?: 'UserType';
-    notifications: {
-      __typename?: 'PaginatedNotificationObjectType';
-      totalCount: number;
-    };
-  } | null;
+  currentUser: { __typename?: 'UserType'; notificationCount: number } | null;
 };
 
 export type PricesQueryVariables = Exact<{ [key: string]: never }>;
@@ -7478,6 +7652,136 @@ export type WorkspaceBlobQuotaQuery = {
   };
 };
 
+export type ClearWorkspaceByokConfigsMutationVariables = Exact<{
+  workspaceId: Scalars['String']['input'];
+}>;
+
+export type ClearWorkspaceByokConfigsMutation = {
+  __typename?: 'Mutation';
+  clearWorkspaceByokConfigs: boolean;
+};
+
+export type DeleteWorkspaceByokConfigMutationVariables = Exact<{
+  workspaceId: Scalars['String']['input'];
+  id: Scalars['ID']['input'];
+}>;
+
+export type DeleteWorkspaceByokConfigMutation = {
+  __typename?: 'Mutation';
+  deleteWorkspaceByokConfig: boolean;
+};
+
+export type ReorderWorkspaceByokConfigsMutationVariables = Exact<{
+  input: ReorderWorkspaceByokConfigsInput;
+}>;
+
+export type ReorderWorkspaceByokConfigsMutation = {
+  __typename?: 'Mutation';
+  reorderWorkspaceByokConfigs: Array<{
+    __typename?: 'WorkspaceByokKeyConfigType';
+    id: string;
+    sortOrder: number;
+  }>;
+};
+
+export type TestWorkspaceByokConfigMutationVariables = Exact<{
+  input: TestWorkspaceByokConfigInput;
+}>;
+
+export type TestWorkspaceByokConfigMutation = {
+  __typename?: 'Mutation';
+  testWorkspaceByokConfig: {
+    __typename?: 'TestWorkspaceByokConfigResultType';
+    ok: boolean;
+    status: ByokKeyTestStatus;
+    message: string | null;
+  };
+};
+
+export type UpsertWorkspaceByokConfigMutationVariables = Exact<{
+  input: UpsertWorkspaceByokConfigInput;
+}>;
+
+export type UpsertWorkspaceByokConfigMutation = {
+  __typename?: 'Mutation';
+  upsertWorkspaceByokConfig: {
+    __typename?: 'WorkspaceByokKeyConfigType';
+    id: string;
+  };
+};
+
+export type CreateWorkspaceByokLocalLeaseMutationVariables = Exact<{
+  input: CreateWorkspaceByokLocalLeaseInput;
+}>;
+
+export type CreateWorkspaceByokLocalLeaseMutation = {
+  __typename?: 'Mutation';
+  createWorkspaceByokLocalLease: {
+    __typename?: 'CreateWorkspaceByokLocalLeaseResultType';
+    leaseId: string;
+    expiresAt: string;
+  };
+};
+
+export type WorkspaceByokSettingsQueryVariables = Exact<{
+  id: Scalars['String']['input'];
+  from: Scalars['DateTime']['input'];
+  to: Scalars['DateTime']['input'];
+}>;
+
+export type WorkspaceByokSettingsQuery = {
+  __typename?: 'Query';
+  workspace: {
+    __typename?: 'WorkspaceType';
+    id: string;
+    byokSettings: {
+      __typename?: 'WorkspaceByokSettingsType';
+      workspaceId: string;
+      entitled: boolean;
+      serverEntitled: boolean;
+      localEntitled: boolean;
+      entitlementRequired: Array<string>;
+      allowedProviders: Array<ByokProvider>;
+      localStorageSupported: boolean;
+      customEndpointSupported: boolean;
+      hasAiPlan: boolean;
+      keys: Array<{
+        __typename?: 'WorkspaceByokKeyConfigType';
+        id: string;
+        provider: ByokProvider;
+        name: string;
+        description: string | null;
+        storage: ByokKeyStorage;
+        configured: boolean;
+        enabled: boolean;
+        endpoint: string | null;
+        endpointEditable: boolean;
+        sortOrder: number;
+        capabilities: Array<string>;
+        testStatus: ByokKeyTestStatus;
+        disabledReason: string | null;
+        lastTestedAt: string | null;
+        lastTestError: string | null;
+        lastUsedAt: string | null;
+        lastErrorAt: string | null;
+        lastError: string | null;
+      }>;
+      warnings: Array<{
+        __typename?: 'WorkspaceByokCapabilityWarningType';
+        featureKind: string;
+        reason: string;
+        requiredProviders: Array<ByokProvider>;
+      }>;
+    };
+    byokUsage: Array<{
+      __typename?: 'WorkspaceByokUsagePointType';
+      date: string;
+      featureKind: string;
+      totalTokens: number;
+    }>;
+  };
+};
+
 export type GetWorkspaceConfigQueryVariables = Exact<{
   id: Scalars['String']['input'];
 }>;
@@ -7490,11 +7794,6 @@ export type GetWorkspaceConfigQuery = {
     enableSharing: boolean;
     enableUrlPreview: boolean;
     enableDocEmbedding: boolean;
-    inviteLink: {
-      __typename?: 'InviteLink';
-      link: string;
-      expireTime: string;
-    } | null;
   };
 };
 
@@ -7561,6 +7860,22 @@ export type AcceptInviteByInviteIdMutationVariables = Exact<{
 export type AcceptInviteByInviteIdMutation = {
   __typename?: 'Mutation';
   acceptInviteById: boolean;
+};
+
+export type GetWorkspaceInviteLinkQueryVariables = Exact<{
+  id: Scalars['String']['input'];
+}>;
+
+export type GetWorkspaceInviteLinkQuery = {
+  __typename?: 'Query';
+  workspace: {
+    __typename?: 'WorkspaceType';
+    inviteLink: {
+      __typename?: 'InviteLink';
+      link: string;
+      expireTime: string;
+    } | null;
+  };
 };
 
 export type CreateInviteLinkMutationVariables = Exact<{
@@ -8105,9 +8420,19 @@ export type Queries =
       response: WorkspaceBlobQuotaQuery;
     }
   | {
+      name: 'workspaceByokSettingsQuery';
+      variables: WorkspaceByokSettingsQueryVariables;
+      response: WorkspaceByokSettingsQuery;
+    }
+  | {
       name: 'getWorkspaceConfigQuery';
       variables: GetWorkspaceConfigQueryVariables;
       response: GetWorkspaceConfigQuery;
+    }
+  | {
+      name: 'getWorkspaceInviteLinkQuery';
+      variables: GetWorkspaceInviteLinkQueryVariables;
+      response: GetWorkspaceInviteLinkQuery;
     }
   | {
       name: 'workspaceInvoicesQuery';
@@ -8302,11 +8627,6 @@ export type Mutations =
       response: UploadCommentAttachmentMutation;
     }
   | {
-      name: 'applyDocUpdatesMutation';
-      variables: ApplyDocUpdatesMutationVariables;
-      response: ApplyDocUpdatesMutation;
-    }
-  | {
       name: 'addContextBlobMutation';
       variables: AddContextBlobMutationVariables;
       response: AddContextBlobMutation;
@@ -8482,6 +8802,11 @@ export type Mutations =
       response: InstallLicenseMutation;
     }
   | {
+      name: 'previewLicenseMutation';
+      variables: PreviewLicenseMutationVariables;
+      response: PreviewLicenseMutation;
+    }
+  | {
       name: 'mentionUserMutation';
       variables: MentionUserMutationVariables;
       response: MentionUserMutation;
@@ -8605,6 +8930,36 @@ export type Mutations =
       name: 'verifyEmailMutation';
       variables: VerifyEmailMutationVariables;
       response: VerifyEmailMutation;
+    }
+  | {
+      name: 'clearWorkspaceByokConfigsMutation';
+      variables: ClearWorkspaceByokConfigsMutationVariables;
+      response: ClearWorkspaceByokConfigsMutation;
+    }
+  | {
+      name: 'deleteWorkspaceByokConfigMutation';
+      variables: DeleteWorkspaceByokConfigMutationVariables;
+      response: DeleteWorkspaceByokConfigMutation;
+    }
+  | {
+      name: 'reorderWorkspaceByokConfigsMutation';
+      variables: ReorderWorkspaceByokConfigsMutationVariables;
+      response: ReorderWorkspaceByokConfigsMutation;
+    }
+  | {
+      name: 'testWorkspaceByokConfigMutation';
+      variables: TestWorkspaceByokConfigMutationVariables;
+      response: TestWorkspaceByokConfigMutation;
+    }
+  | {
+      name: 'upsertWorkspaceByokConfigMutation';
+      variables: UpsertWorkspaceByokConfigMutationVariables;
+      response: UpsertWorkspaceByokConfigMutation;
+    }
+  | {
+      name: 'createWorkspaceByokLocalLeaseMutation';
+      variables: CreateWorkspaceByokLocalLeaseMutationVariables;
+      response: CreateWorkspaceByokLocalLeaseMutation;
     }
   | {
       name: 'setEnableAiMutation';
