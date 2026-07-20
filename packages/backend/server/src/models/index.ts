@@ -7,7 +7,7 @@ import {
 import { ModuleRef } from '@nestjs/core';
 
 import { ApplyType } from '../base';
-import { AccessTokenModel } from './access-token';
+import { AuthSessionModel } from './auth-session';
 import { BlobModel } from './blob';
 import { CalendarAccountModel } from './calendar-account';
 import { CalendarEventModel } from './calendar-event';
@@ -30,8 +30,8 @@ import { FeatureModel } from './feature';
 import { HistoryModel } from './history';
 import { MagicLinkOtpModel } from './magic-link-otp';
 import { MailDeliveryModel } from './mail-delivery';
+import { McpCredentialModel } from './mcp-credential';
 import { NotificationModel } from './notification';
-import { PermissionProjectionModel } from './permission-projection';
 import {
   DocAccessPolicyModel,
   DocGrantModel,
@@ -49,8 +49,6 @@ import { VerificationTokenModel } from './verification-token';
 import { WorkspaceModel } from './workspace';
 import { WorkspaceAnalyticsModel } from './workspace-analytics';
 import { WorkspaceCalendarModel } from './workspace-calendar';
-import { WorkspaceFeatureModel } from './workspace-feature';
-import { WorkspaceRuntimeStateModel } from './workspace-runtime-state';
 import { WorkspaceUserModel } from './workspace-user';
 
 const MODELS = {
@@ -59,18 +57,16 @@ const MODELS = {
   verificationToken: VerificationTokenModel,
   magicLinkOtp: MagicLinkOtpModel,
   mailDelivery: MailDeliveryModel,
+  authSession: AuthSessionModel,
   feature: FeatureModel,
   workspace: WorkspaceModel,
   userFeature: UserFeatureModel,
-  workspaceFeature: WorkspaceFeatureModel,
-  workspaceRuntimeState: WorkspaceRuntimeStateModel,
   doc: DocModel,
   userDoc: UserDocModel,
   workspaceUser: WorkspaceUserModel,
   docUser: DocUserModel,
   history: HistoryModel,
   notification: NotificationModel,
-  permissionProjection: PermissionProjectionModel,
   workspaceMember: WorkspaceMemberModel,
   workspaceInvitation: WorkspaceInvitationModel,
   workspaceAccessPolicy: WorkspaceAccessPolicyModel,
@@ -89,7 +85,7 @@ const MODELS = {
   comment: CommentModel,
   commentAttachment: CommentAttachmentModel,
   blob: BlobModel,
-  accessToken: AccessTokenModel,
+  mcpCredential: McpCredentialModel,
   calendarAccount: CalendarAccountModel,
   calendarSubscription: CalendarSubscriptionModel,
   calendarEvent: CalendarEventModel,
@@ -147,6 +143,7 @@ const ModelsSymbolProvider: ExistingProvider = {
 })
 export class ModelsModule {}
 
+export * from './auth-session';
 export * from './blob';
 export * from './calendar-account';
 export * from './calendar-event';
@@ -169,7 +166,6 @@ export * from './history';
 export * from './magic-link-otp';
 export * from './mail-delivery';
 export * from './notification';
-export * from './permission-projection';
 export * from './permission-write';
 export * from './session';
 export * from './user';
@@ -180,6 +176,5 @@ export * from './verification-token';
 export * from './workspace';
 export * from './workspace-analytics';
 export * from './workspace-calendar';
-export * from './workspace-feature';
-export * from './workspace-runtime-state';
 export * from './workspace-user';
+export type { WorkspaceUserCompat } from './workspace-user-compat';
