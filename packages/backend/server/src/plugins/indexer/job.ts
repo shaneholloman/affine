@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { Config, JOB_SIGNAL, JobQueue, OnJob } from '../../base';
+import { DocReader } from '../../core/doc';
 import { readAllDocIdsFromWorkspaceSnapshot } from '../../core/utils/blocksuite';
 import { Models } from '../../models';
 import { IndexerService } from './service';
@@ -24,6 +25,11 @@ declare global {
     'indexer.autoIndexWorkspaces': {
       lastIndexedWorkspaceSid?: number;
     };
+    'indexer.reconcileDocumentCleanup': {
+      workspaceId: string;
+      docId: string;
+      cleanupVersion: string;
+    };
   }
 }
 
@@ -35,29 +41,23 @@ export class IndexerJob {
     private readonly models: Models,
     private readonly service: IndexerService,
     private readonly queue: JobQueue,
-    private readonly config: Config
+    private readonly config: Config,
+    private readonly doc: DocReader
   ) {}
 
   @OnJob('indexer.indexDoc')
   async indexDoc({ workspaceId, docId }: Jobs['indexer.indexDoc']) {
-    if (!this.config.indexer.enabled) {
-      return;
-    }
-
     // delete the 'indexer.deleteDoc' job from the queue
     await this.queue.remove(
       `deleteDoc/${workspaceId}/${docId}`,
       'indexer.deleteDoc'
     );
     await this.service.indexDoc(workspaceId, docId);
+    await this.enqueueBlobRefProjection(workspaceId, docId);
   }
 
   @OnJob('indexer.deleteDoc')
   async deleteDoc({ workspaceId, docId }: Jobs['indexer.deleteDoc']) {
-    if (!this.config.indexer.enabled) {
-      return;
-    }
-
     // delete the 'indexer.updateDoc' job from the queue
     await this.queue.remove(
       `indexDoc/${workspaceId}/${docId}`,
@@ -66,12 +66,38 @@ export class IndexerJob {
     await this.service.deleteDoc(workspaceId, docId);
   }
 
+  @OnJob('indexer.reconcileDocumentCleanup')
+  async reconcileDocumentCleanup({
+    workspaceId,
+    docId,
+    cleanupVersion,
+  }: Jobs['indexer.reconcileDocumentCleanup']) {
+    const root = await this.doc.getDoc(workspaceId, workspaceId);
+    if (!root) {
+      throw new Error(`workspace root ${workspaceId} not found`);
+    }
+    const live = readAllDocIdsFromWorkspaceSnapshot(root.bin, true).includes(
+      docId
+    );
+    if (live) {
+      if (!(await this.doc.getDoc(workspaceId, docId))) {
+        throw new Error(`restored document ${workspaceId}/${docId} not found`);
+      }
+      await this.service.indexDoc(workspaceId, docId);
+      await this.enqueueBlobRefProjection(workspaceId, docId);
+    } else {
+      await this.service.deleteDoc(workspaceId, docId);
+    }
+    await this.queue.add('backendRuntime.ackDocumentCleanupEffect', {
+      workspaceId,
+      docId,
+      cleanupVersion,
+      effect: 'search',
+    });
+  }
+
   @OnJob('indexer.indexWorkspace')
   async indexWorkspace({ workspaceId }: Jobs['indexer.indexWorkspace']) {
-    if (!this.config.indexer.enabled) {
-      return;
-    }
-
     await this.queue.remove(workspaceId, 'indexer.deleteWorkspace');
     const workspace = await this.models.workspace.get(workspaceId);
     if (!workspace) {
@@ -79,74 +105,17 @@ export class IndexerJob {
       return;
     }
 
-    const snapshot = await this.models.doc.getSnapshot(
-      workspaceId,
-      workspaceId
-    );
-    if (!snapshot) {
-      this.logger.warn(`workspace snapshot ${workspaceId} not found`);
-      return;
-    }
-
-    const docIdsInWorkspace = readAllDocIdsFromWorkspaceSnapshot(snapshot.blob);
-    const docIdsInIndexer = await this.service.listDocIds(workspaceId);
-
-    const docIdsInWorkspaceSet = new Set(docIdsInWorkspace);
-    const docIdsInIndexerSet = new Set(docIdsInIndexer);
-    // diff the docIdsInWorkspace and docIdsInIndexer, if the workspace is not indexed, all the docIdsInWorkspace should be indexed
-    const missingDocIds = workspace.indexed
-      ? docIdsInWorkspace.filter(docId => !docIdsInIndexerSet.has(docId))
-      : docIdsInWorkspace;
-    const deletedDocIds = docIdsInIndexer.filter(
-      docId => !docIdsInWorkspaceSet.has(docId)
-    );
-    for (const docId of deletedDocIds) {
-      await this.queue.add(
-        'indexer.deleteDoc',
-        {
-          workspaceId,
-          docId,
-        },
-        {
-          jobId: `deleteDoc/${workspaceId}/${docId}`,
-          // the deleteDoc job should be higher priority than the indexDoc job
-          priority: 0,
-        }
-      );
-    }
-    for (const docId of missingDocIds) {
-      await this.queue.add(
-        'indexer.indexDoc',
-        {
-          workspaceId,
-          docId,
-        },
-        {
-          jobId: `indexDoc/${workspaceId}/${docId}`,
-          priority: 100,
-        }
-      );
-    }
+    await this.service.reconcileWorkspace(workspaceId);
     if (!workspace.indexed) {
       await this.models.workspace.update(workspaceId, {
         indexed: true,
       });
     }
-    if (!missingDocIds.length && !deletedDocIds.length) {
-      this.logger.verbose(`workspace ${workspaceId} is already indexed`);
-      return;
-    }
-    this.logger.log(
-      `indexed workspace ${workspaceId} with ${missingDocIds.length} missing docs and ${deletedDocIds.length} deleted docs`
-    );
+    this.logger.log(`reconciled workspace ${workspaceId}`);
   }
 
   @OnJob('indexer.deleteWorkspace')
   async deleteWorkspace({ workspaceId }: Jobs['indexer.deleteWorkspace']) {
-    if (!this.config.indexer.enabled) {
-      return;
-    }
-
     await this.queue.remove(
       `indexWorkspace/${workspaceId}`,
       'indexer.indexWorkspace'
@@ -156,10 +125,6 @@ export class IndexerJob {
 
   @OnJob('indexer.autoIndexWorkspaces')
   async autoIndexWorkspaces(payload: Jobs['indexer.autoIndexWorkspaces']) {
-    if (!this.config.indexer.enabled) {
-      return;
-    }
-
     const startSid = payload.lastIndexedWorkspaceSid ?? 0;
     const workspaces = await this.models.workspace.list(
       { sid: { gt: startSid } },
@@ -173,9 +138,6 @@ export class IndexerJob {
     }
     let addedCount = 0;
     for (const workspace of workspaces) {
-      if (workspace.indexed) {
-        continue;
-      }
       const snapshotMeta = await this.models.doc.getSnapshot(
         workspace.id,
         workspace.id,
@@ -208,5 +170,23 @@ export class IndexerJob {
     // update the lastIndexedWorkspaceSid in the payload and repeat the job after 30 seconds
     payload.lastIndexedWorkspaceSid = nextSid;
     return JOB_SIGNAL.Repeat;
+  }
+
+  private async enqueueBlobRefProjection(workspaceId: string, docId: string) {
+    const snapshot = await this.models.doc.getSnapshot(workspaceId, docId, {
+      select: { updatedAt: true },
+    });
+    if (!snapshot) {
+      return;
+    }
+    const sourceRevision = snapshot.updatedAt.getTime();
+    await this.queue.add(
+      'backendRuntime.projectWorkspaceDocBlobRefs',
+      { workspaceId, docId, sourceRevision },
+      {
+        jobId: `doc:blob-ref-projection:${workspaceId}:${docId}:${sourceRevision}`,
+        priority: 100,
+      }
+    );
   }
 }

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { mock } from 'node:test';
 
 import test from 'ava';
 import Sinon from 'sinon';
@@ -9,15 +8,16 @@ import { Mockers } from '../../../__tests__/mocks';
 import { JOB_SIGNAL } from '../../../base';
 import { ConfigModule } from '../../../base/config';
 import { ServerConfigModule } from '../../../core/config';
+import { DocReader } from '../../../core/doc';
 import { Models } from '../../../models';
-import { SearchProviderFactory } from '../factory';
-import { IndexerModule, IndexerService } from '../index';
+import { addDocToRootDoc } from '../../../native';
+import { IndexerModule, IndexerService, IndexerWorkerModule } from '../index';
 import { IndexerJob } from '../job';
-import { ManticoresearchProvider } from '../providers';
 
 const module = await createModule({
   imports: [
     IndexerModule,
+    IndexerWorkerModule,
     ServerConfigModule,
     ConfigModule.override({
       indexer: {
@@ -29,9 +29,8 @@ const module = await createModule({
 });
 const indexerService = module.get(IndexerService);
 const indexerJob = module.get(IndexerJob);
-const searchProviderFactory = module.get(SearchProviderFactory);
-const manticoresearch = module.get(ManticoresearchProvider);
 const models = module.get(Models);
+const docReader = module.get(DocReader);
 
 const user = await module.create(Mockers.User);
 const workspace = await module.create(Mockers.Workspace, {
@@ -45,13 +44,6 @@ test.after.always(async () => {
 
 test.afterEach.always(() => {
   Sinon.restore();
-  mock.reset();
-});
-
-test.beforeEach(() => {
-  mock.method(searchProviderFactory, 'get', () => {
-    return manticoresearch;
-  });
 });
 
 test('should handle indexer.indexDoc job', async t => {
@@ -73,52 +65,89 @@ test('should handle indexer.deleteDoc job', async t => {
 });
 
 test('should handle indexer.indexWorkspace job', async t => {
-  const count = module.queue.count('indexer.deleteDoc');
-  const spy = Sinon.spy(indexerService, 'listDocIds');
+  const spy = Sinon.stub(indexerService, 'reconcileWorkspace').resolves();
 
   await indexerJob.indexWorkspace({
     workspaceId: workspace.id,
   });
 
-  t.is(spy.callCount, 1);
-  const { payload } = await module.queue.waitFor('indexer.indexDoc');
-  t.is(payload.workspaceId, workspace.id);
-  t.is(payload.docId, '5nS9BSp3Px');
-  // no delete job
-  t.is(module.queue.count('indexer.deleteDoc'), count);
+  t.true(spy.calledOnceWith(workspace.id));
 
   // workspace should be indexed
   const ws = await models.workspace.get(workspace.id);
   t.is(ws!.indexed, true);
 });
 
-test('should not sync existing doc', async t => {
-  const count = module.queue.count('indexer.indexDoc');
-  mock.method(indexerService, 'listDocIds', async () => {
-    return ['5nS9BSp3Px'];
+test('document cleanup reconcile deletes missing search state before ack', async t => {
+  const deleteSpy = Sinon.spy(indexerService, 'deleteDoc');
+  const indexSpy = Sinon.spy(indexerService, 'indexDoc');
+  const cleanupWorkspace = await module.create(Mockers.Workspace, {
+    owner: user,
+  });
+  await module.create(Mockers.DocSnapshot, {
+    workspaceId: cleanupWorkspace.id,
+    docId: cleanupWorkspace.id,
+    user,
+    blob: addDocToRootDoc(Buffer.from([0, 0]), 'live-doc', 'Live'),
   });
 
-  await indexerJob.indexWorkspace({
-    workspaceId: workspace.id,
+  await indexerJob.reconcileDocumentCleanup({
+    workspaceId: cleanupWorkspace.id,
+    docId: 'missing-doc',
+    cleanupVersion: 'version-1',
   });
 
-  t.is(module.queue.count('indexer.indexDoc'), count);
+  t.true(deleteSpy.calledOnceWith(cleanupWorkspace.id, 'missing-doc'));
+  t.false(indexSpy.called);
+  const { payload } = await module.queue.waitFor(
+    'backendRuntime.ackDocumentCleanupEffect'
+  );
+  t.deepEqual(payload, {
+    workspaceId: cleanupWorkspace.id,
+    docId: 'missing-doc',
+    cleanupVersion: 'version-1',
+    effect: 'search',
+  });
 });
 
-test('should delete doc from indexer when docId is not in workspace', async t => {
-  const count = module.queue.count('indexer.deleteDoc');
-  mock.method(indexerService, 'listDocIds', async () => {
-    return ['mock-doc-id1', 'mock-doc-id2'];
+test('document cleanup reconcile reindexes restored doc before ack', async t => {
+  const deleteSpy = Sinon.spy(indexerService, 'deleteDoc');
+  const indexSpy = Sinon.spy(indexerService, 'indexDoc');
+  const cleanupWorkspace = await module.create(Mockers.Workspace, {
+    owner: user,
+  });
+  await module.create(Mockers.DocSnapshot, {
+    workspaceId: cleanupWorkspace.id,
+    docId: cleanupWorkspace.id,
+    user,
+    blob: addDocToRootDoc(Buffer.from([0, 0]), 'restored-doc', 'Restored'),
+  });
+  await module.create(Mockers.DocSnapshot, {
+    workspaceId: cleanupWorkspace.id,
+    docId: 'restored-doc',
+    user,
+  });
+  const getDocSpy = Sinon.spy(docReader, 'getDoc');
+
+  await indexerJob.reconcileDocumentCleanup({
+    workspaceId: cleanupWorkspace.id,
+    docId: 'restored-doc',
+    cleanupVersion: 'version-2',
   });
 
-  await indexerJob.indexWorkspace({
-    workspaceId: workspace.id,
+  t.true(indexSpy.calledOnceWith(cleanupWorkspace.id, 'restored-doc'));
+  t.false(deleteSpy.called);
+  t.true(getDocSpy.calledWith(cleanupWorkspace.id, cleanupWorkspace.id));
+  t.true(getDocSpy.calledWith(cleanupWorkspace.id, 'restored-doc'));
+  const { payload } = await module.queue.waitFor(
+    'backendRuntime.ackDocumentCleanupEffect'
+  );
+  t.deepEqual(payload, {
+    workspaceId: cleanupWorkspace.id,
+    docId: 'restored-doc',
+    cleanupVersion: 'version-2',
+    effect: 'search',
   });
-
-  const { payload } = await module.queue.waitFor('indexer.indexDoc');
-  t.is(payload.workspaceId, workspace.id);
-  t.is(payload.docId, '5nS9BSp3Px');
-  t.is(module.queue.count('indexer.deleteDoc'), count + 2);
 });
 
 test('should handle indexer.deleteWorkspace job', async t => {

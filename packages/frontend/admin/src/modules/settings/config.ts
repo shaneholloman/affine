@@ -147,37 +147,39 @@ export const KNOWN_CONFIG_GROUPS = [
     fields: ['providers.google', 'providers.github', 'providers.oidc'],
   } as ConfigGroup<'oauth'>,
   {
-    name: 'AI',
+    name: 'AI BYOK',
     module: 'copilot',
     fields: [
-      'enabled',
-      'providers.openai',
-      'providers.gemini',
-      'providers.anthropic',
-      'providers.fal',
-      'unsplash',
-      'exa',
       {
-        key: 'storage',
-        desc: 'The storage provider for copilot blobs',
-        sub: 'provider',
-        type: 'Enum',
-        options: ['fs', 'aws-s3', 'cloudflare-r2'],
+        key: 'enabled',
+        desc: 'Enable AI features. Workspace owners configure provider keys in Workspace Settings → Integrations → AI BYOK.',
       },
+      'byok.enabled',
+      'byok.allowedProviders',
+      'byok.allowCustomEndpoint',
       {
-        key: 'storage',
-        sub: 'bucket',
-        type: 'String',
-        desc: 'The bucket name for copilot blobs storage',
-      },
-      {
-        key: 'storage',
-        sub: 'config',
-        type: 'JSON',
-        desc: 'The S3 compatible config for the storage provider (endpoint/region/credentials).',
+        key: 'byok.allowPrivateEndpoint',
+        desc: 'Allow workspace owners and admins to connect BYOK providers on private network endpoints. Only enable this for trusted workspaces.',
       },
     ],
   } as ConfigGroup<'copilot'>,
+  {
+    name: 'Indexer',
+    module: 'indexer',
+    fields: [
+      {
+        key: 'provider.type',
+        type: 'Enum',
+        options: ['embedded', 'manticoresearch', 'elasticsearch'],
+        desc: 'Search provider. Embedded keeps external credentials for later reuse.',
+      },
+      'provider.endpoint',
+      'provider.apiKey',
+      'provider.username',
+      'provider.password',
+      'autoIndex.batchSize',
+    ],
+  } as ConfigGroup<'indexer'>,
 ];
 
 export const UNKNOWN_CONFIG_GROUPS = ALL_CONFIGURABLE_MODULES.filter(
