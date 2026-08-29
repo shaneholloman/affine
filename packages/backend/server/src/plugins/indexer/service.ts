@@ -4,16 +4,20 @@ import {
   InternalServerError,
   InvalidIndexerInput,
   OnEvent,
-  SearchProviderNotFound,
+  SearchIndexFailed,
+  SearchIndexNotReady,
+  SearchPermissionSyncing,
+  SearchProviderUnavailable,
   SpaceAccessDenied,
-  WorkspacePermissionNotFound,
 } from '../../base';
 import { BackendRuntimeProvider } from '../../core/backend-runtime';
 import { ServerFeature, ServerService } from '../../core/config';
 import { Models } from '../../models';
 import {
   type AggregateResult,
+  buildBasicSearchDocsInput,
   buildSearchDocsInput,
+  collectBasicSearchDocs,
   collectSearchDocs,
   formatSearchNodes,
   type SearchNode,
@@ -41,21 +45,24 @@ export class IndexerService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap() {
-    await this.syncFeature();
+    this.syncFeature();
   }
 
   @OnEvent('config.changed.broadcast')
   async onConfigChanged({ updates }: Events['config.changed.broadcast']) {
-    if (updates.indexer) await this.syncFeature();
+    if (updates.indexer) this.syncFeature();
   }
 
-  private async syncFeature() {
-    const status = (await this.runtime.searchStatus()) as { ready: boolean };
-    if (status.ready) this.server.enableFeature(ServerFeature.Indexer);
-    else this.server.disableFeature(ServerFeature.Indexer);
+  private syncFeature() {
+    if (this.server.getConfig().indexer.enabled) {
+      this.server.enableFeature(ServerFeature.Indexer);
+    } else {
+      this.server.disableFeature(ServerFeature.Indexer);
+    }
   }
 
   async search(actorUserId: string, workspaceId: string, input: SearchInput) {
+    this.syncFeature();
     const result = this.unwrap<SearchResult>(
       await this.runtime.searchAuthorized(actorUserId, workspaceId, input),
       workspaceId
@@ -68,10 +75,15 @@ export class IndexerService implements OnApplicationBootstrap {
     workspaceId: string,
     input: AggregateInput
   ) {
+    this.syncFeature();
     const result = this.unwrap<AggregateResult>(
       await this.runtime.aggregateAuthorized(actorUserId, workspaceId, input),
       workspaceId
     );
+    return this.formatAggregate(result);
+  }
+
+  private formatAggregate(result: AggregateResult) {
     return {
       ...result,
       buckets: result.buckets.map(bucket => ({
@@ -84,38 +96,42 @@ export class IndexerService implements OnApplicationBootstrap {
     };
   }
 
-  async indexDoc(workspaceId: string, docId: string) {
-    await this.runtime.indexSearchDocument(workspaceId, docId);
-  }
-
-  async deleteDoc(workspaceId: string, docId: string) {
-    await this.runtime.deleteSearchDocument(workspaceId, docId);
-  }
-
-  async reconcileWorkspace(workspaceId: string) {
-    await this.runtime.reconcileSearchWorkspace(workspaceId);
-  }
-
-  async deleteWorkspace(workspaceId: string) {
-    await this.runtime.deleteSearchWorkspace(workspaceId);
-  }
-
   async searchDocsByKeyword(
     actorUserId: string,
     workspaceId: string,
     keyword: string,
     options?: { limit?: number; docIds?: string[] }
   ): Promise<SearchDoc[]> {
+    this.syncFeature();
+    if (options?.limit !== undefined && options.limit <= 0) {
+      throw new InvalidIndexerInput({
+        reason: 'searchDocs limit must be positive',
+      });
+    }
     if (options?.docIds?.length === 0) return [];
-    const result = await this.aggregate(
+    const aggregateOutput = await this.runtime.aggregateAuthorized(
       actorUserId,
       workspaceId,
       buildSearchDocsInput(workspaceId, keyword, options)
     );
-    const { docs, missingTitles, userIds } = collectSearchDocs(
-      result,
-      workspaceId
-    );
+    const collected =
+      !aggregateOutput.ok && aggregateOutput.errorCode === 'unsupported_query'
+        ? collectBasicSearchDocs(
+            await this.search(
+              actorUserId,
+              workspaceId,
+              buildBasicSearchDocsInput(workspaceId, keyword, options)
+            ),
+            workspaceId,
+            options?.limit ?? 20
+          )
+        : collectSearchDocs(
+            this.formatAggregate(
+              this.unwrap<AggregateResult>(aggregateOutput, workspaceId)
+            ),
+            workspaceId
+          );
+    const { docs, missingTitles, userIds } = collected;
     if (missingTitles.length > 0) {
       const metas = await this.models.doc.findMetas(missingTitles, {
         select: { title: true },
@@ -146,9 +162,15 @@ export class IndexerService implements OnApplicationBootstrap {
       case 'unsupported_query':
         throw new InvalidIndexerInput({ reason: output.errorCode });
       case 'provider_unavailable':
-        throw new SearchProviderNotFound();
-      case 'permission_unavailable':
-        throw new WorkspacePermissionNotFound({ spaceId: workspaceId });
+        throw new SearchProviderUnavailable();
+      case 'index_not_ready':
+        throw new SearchIndexNotReady({ spaceId: workspaceId });
+      case 'permission_syncing':
+        throw new SearchPermissionSyncing();
+      case 'index_failed':
+        throw new SearchIndexFailed({
+          diagnosticId: 'search_workspace_reconcile_failed',
+        });
       default:
         throw new InternalServerError();
     }

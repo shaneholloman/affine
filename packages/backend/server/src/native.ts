@@ -71,7 +71,6 @@ import serverNativeModule, {
   type RuntimeVerificationTokenRecord,
   type RuntimeWorkspaceArtifact,
   type RuntimeWorkspaceInviteLinkRecord,
-  type RuntimeWorkspaceStatsDailyRecalibrationResult,
   type SafeFetchRequest,
   type SafeFetchResponse,
   type StorageProviderCapabilities,
@@ -173,7 +172,6 @@ export type {
   RuntimeVerificationTokenRecord,
   RuntimeWorkspaceArtifact,
   RuntimeWorkspaceInviteLinkRecord,
-  RuntimeWorkspaceStatsDailyRecalibrationResult,
   SafeFetchRequest,
   SafeFetchResponse,
   StorageProviderCapabilities,
@@ -233,8 +231,8 @@ import type {
 } from './plugins/copilot/runtime/contracts/tool-contract';
 
 export const mergeUpdatesInApplyWay = serverNativeModule.mergeUpdatesInApplyWay;
-export const authorizeUserdataDocSubject =
-  serverNativeModule.authorizeUserdataDocSubject;
+export const authorizeReservedDocSubject =
+  serverNativeModule.authorizeReservedDocSubject;
 export const authSessionAccessTokenKeyId =
   serverNativeModule.authSessionAccessTokenKeyId;
 export const createAuthSessionRefreshToken =
