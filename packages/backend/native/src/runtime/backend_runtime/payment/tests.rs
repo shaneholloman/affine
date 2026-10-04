@@ -777,6 +777,7 @@ async fn lock_set_expansion_discards_old_snapshots() {
     deployment: Deployment::Cloud,
     revenuecat_config: None,
     mail_hash_key: [0; 32],
+    license_issuer_private_key: None,
     worker: tokio::sync::Mutex::new(None),
   };
   runtime.apply_with_connection(connection, complete).await.unwrap();
@@ -981,6 +982,7 @@ async fn operation_intent_is_frozen_before_send_and_blocks_overlapping_work() {
     deployment: Deployment::Cloud,
     revenuecat_config: None,
     mail_hash_key: [0; 32],
+    license_issuer_private_key: None,
     worker: tokio::sync::Mutex::new(None),
   };
   assert_eq!(
@@ -1086,6 +1088,7 @@ async fn operation_intent_is_frozen_before_send_and_blocks_overlapping_work() {
     deployment: Deployment::Cloud,
     revenuecat_config: None,
     mail_hash_key: [0; 32],
+    license_issuer_private_key: None,
     worker: tokio::sync::Mutex::new(None),
   };
   let provisioned = catalog_runtime
@@ -1124,6 +1127,29 @@ async fn operation_intent_is_frozen_before_send_and_blocks_overlapping_work() {
       .all(|price| price.get("created") == Some(&json!(false)))
   );
   assert!(catalog_requests.recv().await.unwrap().starts_with("GET /v1/prices?"));
+
+  let legacy_user = insert_user(&pool, &format!("{account_marker}-legacy")).await;
+  let legacy_customer = format!("cus-{account_marker}-legacy");
+  sqlx::query("INSERT INTO user_stripe_customers(user_id,stripe_customer_id,provider_namespace) VALUES($1,$2,NULL)")
+    .bind(&legacy_user)
+    .bind(&legacy_customer)
+    .execute(&pool)
+    .await
+    .unwrap();
+  assert_eq!(
+    load_or_adopt_stripe_customer(&pool, &legacy_user, &account_namespace_key)
+      .await
+      .unwrap(),
+    Some(legacy_customer)
+  );
+  assert_eq!(
+    sqlx::query_scalar::<_, String>("SELECT provider_namespace FROM user_stripe_customers WHERE user_id=$1")
+      .bind(&legacy_user)
+      .fetch_one(&pool)
+      .await
+      .unwrap(),
+    account_namespace_key
+  );
   cleanup(&pool, &account_namespace_key, &account_marker).await;
 }
 
@@ -1200,6 +1226,7 @@ async fn snapshot_commit_is_atomic_and_transfer_moves_the_entitlement() {
     deployment: Deployment::Cloud,
     revenuecat_config: None,
     mail_hash_key: [0; 32],
+    license_issuer_private_key: None,
     worker: tokio::sync::Mutex::new(None),
   };
   let raw_event = json!({
@@ -1751,6 +1778,7 @@ async fn snapshot_commit_is_atomic_and_transfer_moves_the_entitlement() {
     deployment: Deployment::Cloud,
     revenuecat_config: None,
     mail_hash_key: [0; 32],
+    license_issuer_private_key: None,
     worker: tokio::sync::Mutex::new(None),
   };
   assert!(
@@ -1963,15 +1991,11 @@ async fn snapshot_commit_is_atomic_and_transfer_moves_the_entitlement() {
     deployment: Deployment::Cloud,
     revenuecat_config: None,
     mail_hash_key: [0; 32],
+    license_issuer_private_key: Some(Arc::new(zeroize::Zeroizing::new(
+      crate::entitlement::tests::TEST_PRIVATE_KEY.to_string(),
+    ))),
     worker: tokio::sync::Mutex::new(None),
   };
-  let previous_private_key = std::env::var_os("AFFINE_PRO_LICENSE_PRIVATE_KEY");
-  unsafe {
-    std::env::set_var(
-      "AFFINE_PRO_LICENSE_PRIVATE_KEY",
-      crate::entitlement::tests::TEST_PRIVATE_KEY,
-    );
-  }
   for legacy in [true, false] {
     let license_key = format!("rfc12-{license_marker}-{legacy}");
     let license_source = format!("sub-{license_marker}-{legacy}");
@@ -2172,13 +2196,6 @@ async fn snapshot_commit_is_atomic_and_transfer_moves_the_entitlement() {
         .await
         .unwrap();
     assert_eq!(binding, (Some("new-workspace".into()), Some(new_generation)));
-  }
-  unsafe {
-    if let Some(previous_private_key) = previous_private_key {
-      std::env::set_var("AFFINE_PRO_LICENSE_PRIVATE_KEY", previous_private_key);
-    } else {
-      std::env::remove_var("AFFINE_PRO_LICENSE_PRIVATE_KEY");
-    }
   }
   cleanup(&pool, &license_namespace_key, &license_marker).await;
 }
@@ -3187,6 +3204,7 @@ async fn revenuecat_access_and_missing_source_rules_fail_closed() {
     deployment: Deployment::Cloud,
     revenuecat_config: Some(config),
     mail_hash_key: [0; 32],
+    license_issuer_private_key: None,
     worker: tokio::sync::Mutex::new(None),
   };
   let revenuecat_event = json!({
